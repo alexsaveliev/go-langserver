@@ -9,5 +9,6 @@ install:
   - go version
   - go env
   - go get -v -t ./...
+  - go get -v gopkg.in/inconshreveable/log15.v2
 build_script:
   - go test -v ./...
