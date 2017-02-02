@@ -8,6 +8,7 @@ install:
   - echo %GOPATH%
   - go version
   - go env
+  - git clone https://github.com/alexsaveliev/ctxvfs --branch windows --single-branch c:\gopath\src\github.com\sourcegraph\ctxvfs  
   - go get -d -t ./...
   - go test -i ./...
 build_script:
