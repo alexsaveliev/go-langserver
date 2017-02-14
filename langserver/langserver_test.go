@@ -818,14 +818,22 @@ type Header struct {
 		"signatures": {
 			rootPath: "file:///src/test/pkg",
 			fs: map[string]string{
-				"a.go": "package p; func A(foo int, bar func(baz int) int) int { return bar(foo) }; func B() {}",
-				"b.go": "package p; func main() { B(); A(); A(0,) }",
+				"a.go": "package p; func A(foo int, bar func(baz int) int) int { return bar(foo) };\n// line 1\n// line 2\nfunc B() {}",
+				"b.go": "package p\nfunc main() {\nB()\nA()\nA(0,)\n}",
+				"c.go": "package p\n// docstring\ntype f func(foo string, bar string)\nfunc ff() f { return nil }\nfunc main() {\n(ff())(}",
+				"d.go": "package p\ntype clz struct{}\n// a does A\nfunc (self clz) a() {}\n// b does B\nfunc (self *clz) b() {}\nfunc main() {\n x := clz{}\n x.a()\n x.b()\npanic()\n}",
+				"e.go": "package p\nfunc x(foo,bar *string) {}\nfunc main() {\nx(}",
 			},
 			cases: lspTestCases{
-				wantSignatures: map[string]string{
-					"b.go:1:27": "func() 0",
-					"b.go:1:32": "func(foo int, bar func(baz int) int) int 0",
-					"b.go:1:39": "func(foo int, bar func(baz int) int) int 1",
+				wantSignatures: map[string][]string{
+					"b.go:3:3":  []string{"func B() 0", "line 1\nline 2\n"},
+					"b.go:4:3":  []string{"func A(foo int, bar func(baz int) int) int 0", "", "foo int", "bar func(baz int) int"},
+					"b.go:5:5":  []string{"func A(foo int, bar func(baz int) int) int 1", "", "foo int", "bar func(baz int) int"},
+					"c.go:6:8":  []string{" 0", ""}, // TODO: function chains
+					"d.go:9:6":  []string{"func (self clz) a() 0", "a does A\n"},
+					"d.go:10:6": []string{"func (self *clz) b() 0", "b does B\n"},
+					"d.go:11:7": []string{" 0", ""}, // TODO: builtins
+					"e.go:4:3":  []string{"func x(foo *string, bar *string) 1", "", "foo *string", "bar *string"},
 				},
 			},
 		},
@@ -946,7 +954,7 @@ type lspTestCases struct {
 	wantReferences          map[string][]string
 	wantSymbols             map[string][]string
 	wantWorkspaceSymbols    map[*lspext.WorkspaceSymbolParams][]string
-	wantSignatures          map[string]string
+	wantSignatures          map[string][]string
 	wantWorkspaceReferences map[*lspext.WorkspaceReferencesParams][]string
 	wantFormatting          map[string]string
 }
@@ -1108,7 +1116,7 @@ func workspaceSymbolsTest(t testing.TB, ctx context.Context, c *jsonrpc2.Conn, r
 	}
 }
 
-func signatureTest(t testing.TB, ctx context.Context, c *jsonrpc2.Conn, rootPath string, pos, want string) {
+func signatureTest(t testing.TB, ctx context.Context, c *jsonrpc2.Conn, rootPath string, pos string, want []string) {
 	file, line, char, err := parsePos(pos)
 	if err != nil {
 		t.Fatal(err)
@@ -1117,8 +1125,20 @@ func signatureTest(t testing.TB, ctx context.Context, c *jsonrpc2.Conn, rootPath
 	if err != nil {
 		t.Fatal(err)
 	}
-	if signature != want {
-		t.Fatalf("got %q, want %q", signature, want)
+	if len(signature) != len(want) {
+		t.Fatalf("got %d items (%v), want %d", len(signature), signature, len(want))
+		return
+	}
+	if signature[0] != want[0] {
+		t.Fatalf("got label %q, want %q", signature[0], want[0])
+	}
+	if signature[1] != want[1] {
+		t.Fatalf("got docstring %q, want %q", signature[1], want[1])
+	}
+	for i := 2; i < len(want); i++ {
+		if signature[i] != want[i] {
+			t.Fatalf("got parameter %q, want %q", signature[i], want[i])
+		}
 	}
 }
 
@@ -1304,24 +1324,26 @@ func callWorkspaceReferences(ctx context.Context, c *jsonrpc2.Conn, params lspex
 	return refs, nil
 }
 
-func callSignature(ctx context.Context, c *jsonrpc2.Conn, uri string, line, char int) (string, error) {
+func callSignature(ctx context.Context, c *jsonrpc2.Conn, uri string, line, char int) ([]string, error) {
 	var res lsp.SignatureHelp
 	err := c.Call(ctx, "textDocument/signatureHelp", lsp.TextDocumentPositionParams{
 		TextDocument: lsp.TextDocumentIdentifier{URI: uri},
 		Position:     lsp.Position{Line: line, Character: char},
 	}, &res)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var str string
-	for i, si := range res.Signatures {
-		if i != 0 {
-			str += "; "
-		}
-		str += si.Label
+	if len(res.Signatures) == 0 {
+		return []string{" 0", ""}, nil
 	}
-	str += fmt.Sprintf(" %d", res.ActiveParameter)
-	return str, nil
+	signature := res.Signatures[0]
+	results := make([]string, 2+len(signature.Parameters))
+	results[0] = fmt.Sprint(signature.Label+" ", res.ActiveParameter)
+	results[1] = signature.Documentation
+	for i, param := range signature.Parameters {
+		results[i+2] = param.Label
+	}
+	return results, nil
 }
 
 func callFormatting(ctx context.Context, c *jsonrpc2.Conn, uri string) ([]lsp.TextEdit, error) {
