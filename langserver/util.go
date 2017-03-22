@@ -3,7 +3,9 @@ package langserver
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -47,7 +49,18 @@ func pathToURI(path string) string {
 
 // uriToPath converts given file URI to path
 func uriToPath(uri string) string {
-	return strings.TrimPrefix(uri, "file://")
+	comps, _ := url.Parse(uri)
+	path := comps.Path
+	if runtime.GOOS == "windows" {
+		// path would be something like "/d:/go/src/"
+		// didOpen assume return path must start from "/", whereres hover assume return path is valid path.
+		// So I decide to return correct path and modify didOpen
+		// because this function name suggest this is what we should do.
+
+		// remove root / and convert to backslash.
+		return filepath.Clean(path[1:])
+	}
+	return path
 }
 
 // panicf takes the return value of recover() and outputs data to the log with

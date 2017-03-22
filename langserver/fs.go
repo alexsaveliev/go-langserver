@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -162,7 +163,11 @@ func (h *overlay) didClose(params *lsp.DidCloseTextDocumentParams) {
 
 func uriToOverlayPath(uri string) string {
 	if isURI(uri) {
-		return strings.TrimPrefix(uriToPath(uri), "/")
+		path := uriToPath(uri)
+		if strings.HasPrefix(path, "/") {
+			return strings.TrimPrefix(uriToPath(uri), "/")
+		}
+		return path
 	}
 	return uri
 }
@@ -201,6 +206,12 @@ func (h *overlay) del(uri string) {
 func (h *HandlerShared) FilePath(uri string) string {
 	path := uriToPath(uri)
 	if !strings.HasPrefix(path, "/") {
+		if runtime.GOOS == "windows" {
+			// In windows case, file:///C:/test.txt become C:/test.txt, so this is valid.
+			// I we want to confirm uri error, we should return err from uriToPath() and check.
+			// But this change is too big for current code status, so I just ignore check for windows case.
+			return path
+		}
 		panic(fmt.Sprintf("bad uri %q (path %q MUST have leading slash; it can't be relative)", uri, path))
 	}
 	return path
